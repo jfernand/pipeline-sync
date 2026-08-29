@@ -2,20 +2,22 @@
 name = "pipeline-sync"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 
 [workspace]
 members = [ "crates/broadcast"]
 
 [workspace.dependencies]
+anyhow = "1.0.104"
+data-encoding = "2.11.1"
 iroh = { version = "1.0.0" }
 iroh-gossip = "0.101.0"
 iroh-mdns-address-lookup = "0.5.0"
 iroh-tickets = "1.0.0"
 n0-error = "1.0.0"
 n0-future = "0.3.2"
+postcard = "1.1.3"
+serde = { version = "1", features = ["derive"] }
 sha2 = "0.11.0"
 tokio = { version = "1" }
-serde = { version = "1", features = ["derive"] }
-anyhow = "1.0.104"
-data-encoding = "2.11.1"
-postcard = "1.1.3"
+uuid = { version = "1.26.0", features = ["v7"] }

@@ -1,4 +1,7 @@
 mod sync_ticket;
+mod protocol;
+mod chain;
+mod sha256;
 
 use crate::sync_ticket::SyncTicket;
 use iroh::{
@@ -10,7 +13,9 @@ use iroh_mdns_address_lookup::MdnsAddressLookup;
 use n0_error::{AnyError, Result, StdResultExt};
 use n0_future::StreamExt;
 use std::env;
-use std::str::FromStr;
+use std::str::{from_utf8, FromStr};
+use iroh_gossip::api::{GossipReceiver, GossipSender};
+use tokio::task::JoinSet;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -70,38 +75,69 @@ async fn listen(
         .spawn();
     // then, you can subscribe to the topic and join your initial peers
     let peer_ids = bootstrap_peers.iter().map(|p| p.id).collect();
-    let (sender, mut receiver) = gossip
+    let (mut sender, mut receiver) = gossip
         .subscribe(topic_id, peer_ids)
         .await?
         .split();
 
-    // you might want to wait until you joined at least one other peer:
     receiver
         .joined()
         .await?;
 
-    // then, you can broadcast messages to all other peers!
+    let message = format!("HELO {:?}", endpoint.id().to_string());
     sender
         .broadcast(
-            b"hello world this is a gossip message"
+            message.as_bytes()
                 .to_vec()
                 .into(),
         )
         .await?;
+    let mut set: JoinSet<Result<(), AnyError>> = JoinSet::new();
+    set.spawn(async move {
+        // and read messages from others
+        process_messages(&mut receiver).await?;
+        Ok(())
+    });
+    set.spawn(async move {
+        // and read messages from others
+        send_messages(&mut sender).await?;
+        Ok(())
+    });
 
-    // and read messages from others
+    if let Some(res) = set.join_next().await {
+        match res {
+            Ok(_) => {}
+            Err(err) => {
+                println!("Error: {:?}", err);
+            }
+        }
+    }
+    Ok(router)
+}
+
+async fn process_messages(receiver: &mut GossipReceiver) -> Result<(), AnyError> {
     while let Some(event) = receiver
         .next()
         .await
     {
         if let Event::Received(message) = event? {
             println!(
-                "received a message: {:?}",
-                std::str::from_utf8(&message.content)
+                "received: {:?} from: {:?}",
+                from_utf8(&message.content),
+                message.scope
             );
         }
     }
-    Ok(router)
+    Ok(())
+}
+
+async fn send_messages(sender: &mut GossipSender) -> Result<(), AnyError> {
+    sender.broadcast(
+        "Hello".as_bytes()
+            .to_vec()
+            .into(),
+    ).await?;
+    Ok(())
 }
 
 fn topic_id(topic_name: &str) -> TopicId {

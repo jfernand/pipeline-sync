@@ -2,6 +2,7 @@
 name = "broadcast"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 anyhow = {workspace = true}
@@ -16,3 +17,4 @@ postcard = {workspace = true}
 serde = { workspace = true }
 sha2 = { workspace = true }
 tokio = { workspace = true }
+uuid = { version = "1.26.0", features = ["v7"] }
