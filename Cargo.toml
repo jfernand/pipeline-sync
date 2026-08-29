@@ -1,0 +1,21 @@
+[package]
+name = "pipeline-sync"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+members = [ "crates/broadcast"]
+
+[workspace.dependencies]
+iroh = { version = "1.0.0" }
+iroh-gossip = "0.101.0"
+iroh-mdns-address-lookup = "0.5.0"
+iroh-tickets = "1.0.0"
+n0-error = "1.0.0"
+n0-future = "0.3.2"
+sha2 = "0.11.0"
+tokio = { version = "1" }
+serde = { version = "1", features = ["derive"] }
+anyhow = "1.0.104"
+data-encoding = "2.11.1"
+postcard = "1.1.3"
