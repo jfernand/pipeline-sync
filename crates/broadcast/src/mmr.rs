@@ -97,8 +97,12 @@ impl MerkleRangeTree {
         let mut size = self.size;
         let mut pos = 0;
 
+        // Peaks occupy positions left to right in *decreasing* size order (the
+        // largest peak is built, and thus closes, first), so bits must be taken
+        // off from the highest set bit down — not the lowest, which would put
+        // a smaller peak's position range before a larger one that precedes it.
         while size > 0 {
-            let height = size.trailing_zeros();
+            let height = 63 - size.leading_zeros();
             let peak_size = (1u64 << (height + 1)) - 1;
             pos += peak_size;
             peaks.push(pos - 1);
@@ -211,7 +215,8 @@ mod tests {
         assert_eq!(pos, 3, "pos(3)");
         assert_eq!(mmr.len(), 3); // 0b11
         assert_eq!(mmr.nodes(), 4);
-        assert_eq!(&mmr.get_peaks(), &[0, 3]);
+        // peaks are (a+b) at 2 and c at 3 — not a lone `a` at 0.
+        assert_eq!(&mmr.get_peaks(), &[2, 3]);
 
         let (pos, height) =mmr.append("d".into());
         dbg!(&mmr);
