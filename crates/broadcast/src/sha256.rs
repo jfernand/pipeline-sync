@@ -1,4 +1,81 @@
-pub fn sha256(input: &[u8]) -> [u8; 32] {
+#![allow(unused)]
+use std::fmt::{Debug, Display};
+use std::ops::Add;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sha256Text(String);
+
+impl Display for Sha256Text {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<Sha256Text> for String {
+    fn from(value: Sha256Text) -> String {
+        value.0
+    }
+}
+
+impl From<&str> for Sha256Text {
+    fn from(value: &str) -> Sha256Text {
+        Sha256Text(value.to_string())
+    }
+}
+
+impl From<String> for Sha256Text {
+    fn from(value: String) -> Sha256Text {
+        Sha256Text(value)
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Copy, Default)]
+pub(crate) struct Sha256Hash([u8; 32]);
+
+impl Sha256Hash {
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn to_hex(&self) -> Sha256Text {
+        Sha256Text(
+            self.0
+                .iter()
+                .map(|byte| format!("{:02x}", byte))
+                .collect::<String>(),
+        )
+    }
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl Add for Sha256Hash {
+    type Output = Sha256Hash;
+    fn add(self, other: Sha256Hash) -> Self {
+        let bytes = [self.0, other.0].concat();
+        sha256(&bytes)
+    }
+}
+impl Debug for Sha256Hash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_hex())
+    }
+}
+
+impl Display for Sha256Hash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl From<&str> for Sha256Hash {
+    fn from(value: &str) -> Self {
+        sha256(value.as_bytes())
+    }
+}
+
+fn sha256(input: &[u8]) -> Sha256Hash {
     let mut h0 = 0x6a09e667u32;
     let mut h1 = 0xbb67ae85u32;
     let mut h2 = 0x3c6ef372u32;
@@ -93,7 +170,7 @@ pub fn sha256(input: &[u8]) -> [u8; 32] {
         result[index * 4 + 2] = (word >> 8) as u8;
         result[index * 4 + 3] = word as u8;
     }
-    result
+    Sha256Hash(result)
 }
 
 pub fn to_hex(bytes: &[u8]) -> String {
@@ -131,7 +208,7 @@ mod tests {
     }
 
     fn assert_hash(value: &str, hash: &str) {
-        assert_eq!(to_hex(&sha256(value.as_bytes())), hash)
+        assert_eq!(sha256(value.as_bytes()).to_hex(), hash.into())
     }
 
     #[test]
@@ -183,8 +260,8 @@ mod tests {
     #[test]
     fn different_inputs_never_collide_in_practice() {
         assert_ne!(
-            to_hex(&sha256("a".as_bytes())),
-            to_hex(&sha256("b".as_bytes()))
+            sha256("a".as_bytes()).to_hex(),
+            sha256("b".as_bytes()).to_hex()
         )
     }
 }
