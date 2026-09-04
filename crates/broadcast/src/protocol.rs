@@ -1,3 +1,4 @@
+#[allow(unused)]
 enum Message {
     Hello,
     Head { head_hash: Vec<u8> },

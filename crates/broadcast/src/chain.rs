@@ -1,5 +1,7 @@
+#[allow(unused)]
 use std::collections::HashMap;
-use uuid::{Timestamp, Uuid};
+use std::fmt::Display;
+use uuid::Uuid;
 
 struct EventChain {
     store: HashMap<Hash, EventEnvelope>,
@@ -8,6 +10,7 @@ struct EventChain {
 }
 
 #[derive(Clone, Debug)]
+#[allow(unused)]
 struct EventEnvelope {
     hash: Hash,
     parent_hashes: Vec<Hash>,
@@ -37,14 +40,21 @@ impl EventEnvelope {
 }
 
 #[derive(Eq, Hash, PartialEq, Clone, Debug)]
-struct Hash(String);
+pub struct Hash(String);
+
+impl Display for Hash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl Hash {
-    fn new(payload: String) -> Self {
+    pub(crate) fn new(payload: String) -> Self {
         Hash(payload)
     }
 }
 
+#[allow(unused)]
 #[derive(Clone, Debug)]
 struct DeviceId(String);
 
@@ -88,7 +98,6 @@ impl EventChain {
 
 #[cfg(test)]
 mod tests {
-    use uuid::Timestamp;
     use crate::chain::{DeviceId, EventChain};
 
     #[test]
