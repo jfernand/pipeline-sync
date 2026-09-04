@@ -7,7 +7,7 @@ pub struct Sha256Text(String);
 
 impl Display for Sha256Text {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "|{:.6}|", self.0)
     }
 }
 
