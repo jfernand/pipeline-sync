@@ -15,10 +15,13 @@ struct MmrNode {
 /// Simple Merkle Mountain Range implementation
 /// An MMR is an append-only data structure that maintains a forest of perfect binary trees
 pub struct MerkleRangeTree {
-    /// Storage for all nodes in the MMR
-    nodes: BTreeMap<u64, (Sha256Hash, String)>,
+    /// Storage for all nodes in the MMR, keyed by their postorder position
+    /// (leaves *and* merge nodes each occupy one position).
+    nodes: BTreeMap<u64, (Sha256Hash, u32, String)>,
     /// Current size (number of leaves)
     size: u64,
+    /// Next free postorder position, i.e. total nodes (leaves + merges) ever inserted
+    next_pos: u64,
 }
 
 impl MerkleRangeTree {
@@ -27,6 +30,7 @@ impl MerkleRangeTree {
         Self {
             nodes: BTreeMap::new(),
             size: 0,
+            next_pos: 0,
         }
     }
 
@@ -35,61 +39,56 @@ impl MerkleRangeTree {
         let hash: Sha256Hash = value
             .as_str()
             .into();
-        let pos = self.size;
+        let pos = self.next_pos;
+        self.next_pos += 1;
         self.nodes
-            .insert(pos, (hash, value));
+            .insert(pos, (hash, 0, value));
         self.size += 1;
 
         // Merge peaks if needed
         let mut height = 0;
         let mut current_pos = pos;
 
-        while self.can_merge(current_pos, height) {
-            let left_sibling = Self::left_sibling(height, current_pos);
-            let (left, _) = self
+        while let Some(left_sibling) = self.can_merge(current_pos, height) {
+            let (left, _, _) = self
                 .nodes
                 .get(&left_sibling)
                 .unwrap();
-            let (right, _) = self
+            let (right, _, _) = self
                 .nodes
                 .get(&current_pos)
                 .unwrap();
             let parent_hash = *left + *right;
+            let parent_value = format!("{left}+{right}");
 
-            current_pos += 1;
-            self.nodes
-                .insert(current_pos, (parent_hash, format!("{left}+{right}").to_string()));
             height += 1;
+            current_pos = self.next_pos;
+            self.next_pos += 1;
+            self.nodes
+                .insert(current_pos, (parent_hash, height, parent_value));
         }
 
         (pos, height)
     }
 
     // Determine the position of the left sibling of a node at a given height and position
-    fn left_sibling(height: u32, current_pos: u64) -> u64 {
-        current_pos + 1 - (1 << (height + 1))
+    fn left_sibling(height: u32, current_pos: u64) -> Option<u64> {
+        current_pos.checked_sub((1u64 << (height + 1)) - 1)
     }
 
-    /// Check if we can merge at the given position and height
-    fn can_merge(&self, pos: u64, height: u32) -> bool {
-        let left_sibling = if pos < (1 << (height + 1)) - 1 {
-            return false;
-        } else {
-            pos - ((1 << (height + 1)) - 1)
-        };
+    /// Check whether the node at `pos`/`height` has a same-height sibling to merge with,
+    /// returning that sibling's position if so.
+    ///
+    /// A position existing at the computed offset isn't enough on its own: postorder
+    /// positions are shared by leaves and internal nodes, so the offset can land on an
+    /// unrelated node from a previously-closed subtree. Its height must match too.
+    fn can_merge(&self, pos: u64, height: u32) -> Option<u64> {
+        let left_sibling = Self::left_sibling(height, pos)?;
 
-        self.nodes
-            .contains_key(&left_sibling)
-    }
-
-    /// Merge two hashes to create parent hash
-    fn merge_hashes(&self, left: &Sha256Hash, right: &Sha256Hash) -> Sha256Hash {
-        // use sha2::{Digest, Sha256};
-        // let mut hasher = Sha256::new();
-        // hasher.update(left.as_bytes());
-        // hasher.update(right.as_bytes());
-        // Sha256Hash::new(hasher.finalize().into())
-        *left + *right
+        match self.nodes.get(&left_sibling) {
+            Some((_, sibling_height, _)) if *sibling_height == height => Some(left_sibling),
+            _ => None,
+        }
     }
 
     /// Get the peak positions for the current MMR
@@ -123,7 +122,7 @@ impl MerkleRangeTree {
                 self.nodes
                     .get(&pos)
                     .cloned()
-                    .map(|(hash, _)| hash)
+                    .map(|(hash, _, _)| hash)
             })
             .collect();
 
@@ -162,7 +161,7 @@ impl MerkleRangeTree {
 impl Debug for MerkleRangeTree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let header = format!("MerkleRangeTree {{ size: {}", self.size);
-        let nodes = self.nodes.iter().map(|(k, (h,v))| format!("{}, {}, {}\n", k, h, v)).collect::<Vec<String>>().join("");
+        let nodes = self.nodes.iter().map(|(k, (h, height, v))| format!("{}, h{}, {}, {}\n", k, height, h, v)).collect::<Vec<String>>().join("");
         write!(f, "{}\n{}\n }}", header, nodes)
     }
 }
@@ -172,10 +171,11 @@ mod tests {
 
     #[test]
     pub fn test_left_sibling() {
-        let height = 2;
-        let current_pos = 3;
-        let left_sibling = MerkleRangeTree::left_sibling(height, current_pos);
-        assert_eq!(left_sibling, 1);
+        // node 5 (c+d, height 1) sibling-checks against node 2 (a+b, height 1)
+        // in the 4-leaf tree built by `test` below.
+        assert_eq!(MerkleRangeTree::left_sibling(1, 5), Some(2));
+        // out-of-range combinations must not underflow the position arithmetic.
+        assert_eq!(MerkleRangeTree::left_sibling(2, 3), None);
     }
 
     #[test]
@@ -206,18 +206,22 @@ mod tests {
         dbg!("c", &mmr);
         dbg!(&mmr.get_root());
         dbg!(&mmr.get_peaks());
-        assert_eq!(height, 2, "h(3)");
-        assert_eq!(pos, 2, "pos(3)");
+        // c has no sibling yet (node 2 is height 1, not height 0), so it stays its own peak.
+        assert_eq!(height, 0, "h(3)");
+        assert_eq!(pos, 3, "pos(3)");
         assert_eq!(mmr.len(), 3); // 0b11
-        assert_eq!(mmr.nodes(), 5);
+        assert_eq!(mmr.nodes(), 4);
         assert_eq!(&mmr.get_peaks(), &[0, 3]);
 
         let (pos, height) =mmr.append("d".into());
         dbg!(&mmr);
         dbg!(&mmr.get_root());
         dbg!(&mmr.get_peaks());
+        // d merges with c (height 0), then (c+d) merges with (a+b) (height 1).
+        assert_eq!(height, 2, "h(4)");
+        assert_eq!(pos, 4, "pos(4)");
         assert_eq!(mmr.len(), 4); //0b100
-        assert_eq!(mmr.nodes(), 6);
+        assert_eq!(mmr.nodes(), 7);
         assert_eq!(&mmr.get_peaks(), &[6])
     }
 }
