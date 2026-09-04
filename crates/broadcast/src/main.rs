@@ -4,6 +4,7 @@ mod chain;
 mod sha256;
 mod merkle;
 mod mmr;
+mod mmr_v2;
 
 use crate::sync_ticket::SyncTicket;
 use iroh::{
