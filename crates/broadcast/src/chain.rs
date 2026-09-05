@@ -195,7 +195,7 @@ enum ChainError {
 
 #[cfg(test)]
 mod tests {
-    use crate::chain::{DeviceId, EventChain};
+    use crate::chain::{ChainError, DeviceId, EventChain, EventEnvelope};
 
     #[test]
     fn add_event() {
@@ -204,5 +204,73 @@ mod tests {
         chain.add_event("test".to_string(), device_id.clone(), 0);
         assert_eq!(chain.store.len(), 1);
         assert_eq!(chain.local_tip, Some(chain.store.values().next().unwrap().hash.clone()));
+    }
+
+    /// Build a chain with a single root event, then two events from two different
+    /// devices that both list the root as their sole parent — a fork.
+    fn forked_chain() -> (EventChain, DeviceId, DeviceId) {
+        let mut chain = EventChain::new();
+        let root_device = DeviceId::random();
+        chain.add_event("root".to_string(), root_device, 0);
+        let root = chain.local_tip.clone().unwrap();
+
+        let (low, high) = {
+            let a = DeviceId::random();
+            let b = DeviceId::random();
+            if a < b { (a, b) } else { (b, a) }
+        };
+
+        let event_low = EventEnvelope::new("from low".to_string(), vec![root.clone()], low.clone(), 1, 1);
+        let event_high = EventEnvelope::new("from high".to_string(), vec![root], high.clone(), 1, 1);
+        chain.store.insert(event_low.hash.clone(), event_low);
+        chain.store.insert(event_high.hash.clone(), event_high);
+
+        (chain, low, high)
+    }
+
+    #[test]
+    fn heads_diverge_on_fork() {
+        let (chain, _low, _high) = forked_chain();
+        assert_eq!(chain.heads().len(), 2);
+        assert!(chain.is_conflicted());
+    }
+
+    #[test]
+    fn resolver_is_deterministic() {
+        let (chain, low, _high) = forked_chain();
+        assert_eq!(chain.resolver(), Some(low));
+    }
+
+    #[test]
+    fn add_merge_event_by_resolver_succeeds() {
+        let (mut chain, low, _high) = forked_chain();
+        let result = chain.add_merge_event("resolved".to_string(), low, 2);
+        assert!(result.is_ok());
+        let merge_hash = result.unwrap();
+        assert_eq!(chain.heads(), vec![merge_hash.clone()]);
+        assert_eq!(chain.local_tip, Some(merge_hash));
+    }
+
+    #[test]
+    fn add_merge_event_by_non_resolver_fails() {
+        let (mut chain, low, high) = forked_chain();
+        let heads_before = {
+            let mut heads = chain.heads();
+            heads.sort();
+            heads
+        };
+
+        let result = chain.add_merge_event("resolved".to_string(), high.clone(), 2);
+        assert_eq!(
+            result,
+            Err(ChainError::NotAuthorizedResolver {
+                attempted: high,
+                required: low,
+            })
+        );
+
+        let mut heads_after = chain.heads();
+        heads_after.sort();
+        assert_eq!(heads_after, heads_before);
     }
 }
