@@ -1,18 +1,19 @@
 #[allow(unused)]
 use crate::sha256::Sha256Hash;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
 use uuid::Uuid;
 
-struct EventChain {
+pub(crate) struct EventChain {
     store: HashMap<Hash, EventEnvelope>,
     local_tip: Option<Hash>,
     sequence: u64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[allow(unused)]
-struct EventEnvelope {
+pub(crate) struct EventEnvelope {
     hash: Hash,
     parent_hashes: Vec<Hash>,
     device_id: DeviceId,
@@ -62,7 +63,7 @@ impl EventEnvelope {
     }
 }
 
-#[derive(Eq, Hash, PartialEq, PartialOrd, Ord, Clone, Debug)]
+#[derive(Eq, Hash, PartialEq, PartialOrd, Ord, Clone, Debug, Serialize, Deserialize)]
 pub struct Hash(String);
 
 impl Display for Hash {
@@ -78,17 +79,21 @@ impl Hash {
 }
 
 #[allow(unused)]
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct DeviceId(String);
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub(crate) struct DeviceId(String);
 
 impl DeviceId {
-    fn random() -> DeviceId {
+    pub(crate) fn random() -> DeviceId {
         DeviceId(Uuid::new_v4() .to_string())
+    }
+
+    pub(crate) fn new(id: String) -> DeviceId {
+        DeviceId(id)
     }
 }
 
 impl EventChain {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         EventChain {
             store: HashMap::new(),
             local_tip: None,
@@ -96,7 +101,7 @@ impl EventChain {
         }
     }
 
-    fn add_event(&mut self, payload: String, device_id: DeviceId, timestamp_millis: u64) {
+    pub(crate) fn add_event(&mut self, payload: String, device_id: DeviceId, timestamp_millis: u64) {
         self.sequence += 1;
         let parent_hashes = match &self.local_tip {
             None => vec![],
@@ -120,9 +125,14 @@ impl EventChain {
         self.local_tip = Some(event_hash);
     }
 
+    /// Look up a stored event by its hash, for transferring it to a peer.
+    pub(crate) fn get_event(&self, hash: &Hash) -> Option<EventEnvelope> {
+        self.store.get(hash).cloned()
+    }
+
     /// The current DAG leaves: hashes not referenced as a parent by any other event.
     /// More than one head means the chain has diverged and needs a merge event.
-    fn heads(&self) -> Vec<Hash> {
+    pub(crate) fn heads(&self) -> Vec<Hash> {
         let referenced: std::collections::HashSet<&Hash> = self
             .store
             .values()
@@ -135,7 +145,7 @@ impl EventChain {
             .collect()
     }
 
-    fn is_conflicted(&self) -> bool {
+    pub(crate) fn is_conflicted(&self) -> bool {
         self.heads().len() > 1
     }
 
@@ -144,7 +154,7 @@ impl EventChain {
     /// state, so any peer holding the same heads computes the same answer without
     /// coordinating — that's what prevents two devices from both authoring a
     /// resolution for the same fork.
-    fn resolver(&self) -> Option<DeviceId> {
+    pub(crate) fn resolver(&self) -> Option<DeviceId> {
         self.heads()
             .into_iter()
             .filter_map(|hash| self.store.get(&hash).map(|event| event.device_id.clone()))
@@ -154,7 +164,7 @@ impl EventChain {
     /// Resolve the current conflict with a merge event whose parents are every
     /// diverged head, so any peer can recognize this event resolves that fork.
     /// Only the elected `resolver()` may author it.
-    fn add_merge_event(
+    pub(crate) fn add_merge_event(
         &mut self,
         payload: String,
         device_id: DeviceId,
@@ -184,8 +194,8 @@ impl EventChain {
     }
 }
 
-#[derive(Debug, PartialEq)]
-enum ChainError {
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) enum ChainError {
     NothingToMerge,
     NotAuthorizedResolver {
         attempted: DeviceId,
