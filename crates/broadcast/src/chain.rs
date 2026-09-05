@@ -119,6 +119,78 @@ impl EventChain {
             );
         self.local_tip = Some(event_hash);
     }
+
+    /// The current DAG leaves: hashes not referenced as a parent by any other event.
+    /// More than one head means the chain has diverged and needs a merge event.
+    fn heads(&self) -> Vec<Hash> {
+        let referenced: std::collections::HashSet<&Hash> = self
+            .store
+            .values()
+            .flat_map(|event| &event.parent_hashes)
+            .collect();
+        self.store
+            .keys()
+            .filter(|hash| !referenced.contains(hash))
+            .cloned()
+            .collect()
+    }
+
+    fn is_conflicted(&self) -> bool {
+        self.heads().len() > 1
+    }
+
+    /// The device authorized to resolve the current conflict, if any: the lowest
+    /// `DeviceId` among the diverged heads' authors. A pure function of `store`
+    /// state, so any peer holding the same heads computes the same answer without
+    /// coordinating — that's what prevents two devices from both authoring a
+    /// resolution for the same fork.
+    fn resolver(&self) -> Option<DeviceId> {
+        self.heads()
+            .into_iter()
+            .filter_map(|hash| self.store.get(&hash).map(|event| event.device_id.clone()))
+            .min()
+    }
+
+    /// Resolve the current conflict with a merge event whose parents are every
+    /// diverged head, so any peer can recognize this event resolves that fork.
+    /// Only the elected `resolver()` may author it.
+    fn add_merge_event(
+        &mut self,
+        payload: String,
+        device_id: DeviceId,
+        timestamp_millis: u64,
+    ) -> Result<Hash, ChainError> {
+        let heads = self.heads();
+        if heads.len() < 2 {
+            return Err(ChainError::NothingToMerge);
+        }
+        let required = self
+            .resolver()
+            .expect("resolver exists whenever there are >= 2 heads");
+        if device_id != required {
+            return Err(ChainError::NotAuthorizedResolver {
+                attempted: device_id,
+                required,
+            });
+        }
+
+        self.sequence += 1;
+        let event = EventEnvelope::new(payload, heads, device_id, self.sequence, timestamp_millis);
+        let hash = event.hash.clone();
+        self.store
+            .insert(event.hash.clone(), event);
+        self.local_tip = Some(hash.clone());
+        Ok(hash)
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum ChainError {
+    NothingToMerge,
+    NotAuthorizedResolver {
+        attempted: DeviceId,
+        required: DeviceId,
+    },
 }
 
 #[cfg(test)]
