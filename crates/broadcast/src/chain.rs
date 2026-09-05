@@ -86,6 +86,7 @@ impl EventChain {
             self.sequence,
             timestamp_millis,
         );
+        let event_hash = event.hash.clone();
         self.store
             .insert(
                 event
@@ -93,6 +94,7 @@ impl EventChain {
                     .clone(),
                 event,
             );
+        self.local_tip = Some(event_hash);
     }
 }
 
