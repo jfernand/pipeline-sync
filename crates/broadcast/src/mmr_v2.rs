@@ -35,33 +35,55 @@ impl MerkleRangeTreeV2 {
 
     /// Append a new leaf to the MMR
     pub fn append(&mut self, value: String) -> (u64, u32) {
-        let hash: Sha256Hash = value.as_str().into();
+        let hash: Sha256Hash = value
+            .as_str()
+            .into();
         let pos = self.next_pos;
         self.next_pos += 1;
-        self.nodes.insert(pos, (hash, 0, value));
+        self.nodes
+            .insert(pos, (hash, 0, value));
         self.size += 1;
-        self.peaks.push((pos, 0, hash));
+        self.peaks
+            .push((pos, 0, hash));
 
         let mut height = 0;
-        while self.peaks.len() >= 2 {
-            let (right_pos, right_height, right_hash) = self.peaks[self.peaks.len() - 1];
-            let (left_pos, left_height, left_hash) = self.peaks[self.peaks.len() - 2];
+        while self
+            .peaks
+            .len()
+            >= 2
+        {
+            let (right_pos, right_height, right_hash) = self.peaks[self
+                .peaks
+                .len()
+                - 1];
+            let (left_pos, left_height, left_hash) = self.peaks[self
+                .peaks
+                .len()
+                - 2];
             if left_height != right_height {
                 break;
             }
 
-            self.peaks.pop();
-            self.peaks.pop();
+            self.peaks
+                .pop();
+            self.peaks
+                .pop();
 
             let parent_hash = left_hash + right_hash;
             let parent_height = left_height + 1;
             let parent_pos = self.next_pos;
             self.next_pos += 1;
-            self.nodes.insert(
-                parent_pos,
-                (parent_hash, parent_height, format!("{left_hash}+{right_hash}")),
-            );
-            self.peaks.push((parent_pos, parent_height, parent_hash));
+            self.nodes
+                .insert(
+                    parent_pos,
+                    (
+                        parent_hash,
+                        parent_height,
+                        format!("{left_hash}+{right_hash}"),
+                    ),
+                );
+            self.peaks
+                .push((parent_pos, parent_height, parent_hash));
             height = parent_height;
         }
 
@@ -70,12 +92,37 @@ impl MerkleRangeTreeV2 {
 
     /// Get the peak positions for the current MMR
     pub fn get_peaks(&self) -> Vec<u64> {
-        self.peaks.iter().map(|&(pos, _, _)| pos).collect()
+        self.peaks
+            .iter()
+            .map(|&(pos, _, _)| pos)
+            .collect()
+    }
+
+    /// Get the current peaks as (position, height, hash) triples.
+    pub fn peak_hashes(&self) -> Vec<(u64, u32, Sha256Hash)> {
+        self.peaks.clone()
+    }
+
+    /// Look up the hash of any node (leaf or merge) by its postorder position.
+    pub fn node_hash(&self, pos: u64) -> Option<Sha256Hash> {
+        self.nodes.get(&pos).map(|&(hash, _, _)| hash)
+    }
+
+    /// Look up a leaf's value by its postorder position, `None` if that
+    /// position holds a merge node instead of a leaf.
+    pub fn leaf(&self, pos: u64) -> Option<String> {
+        self.nodes.get(&pos).and_then(|(_, height, value)| {
+            (*height == 0).then(|| value.clone())
+        })
     }
 
     /// Calculate the root hash by bagging all peaks
     pub fn get_root(&self) -> Option<Sha256Hash> {
-        let mut peak_hashes: Vec<Sha256Hash> = self.peaks.iter().map(|&(_, _, hash)| hash).collect();
+        let mut peak_hashes: Vec<Sha256Hash> = self
+            .peaks
+            .iter()
+            .map(|&(_, _, hash)| hash)
+            .collect();
 
         if peak_hashes.is_empty() {
             return None;
@@ -83,12 +130,18 @@ impl MerkleRangeTreeV2 {
 
         // Bag the peaks from right to left
         while peak_hashes.len() > 1 {
-            let right = peak_hashes.pop().unwrap();
-            let left = peak_hashes.pop().unwrap();
+            let right = peak_hashes
+                .pop()
+                .unwrap();
+            let left = peak_hashes
+                .pop()
+                .unwrap();
             peak_hashes.push(left + right);
         }
 
-        peak_hashes.into_iter().next()
+        peak_hashes
+            .into_iter()
+            .next()
     }
 
     /// Get the number of leaves in the MMR
@@ -97,7 +150,8 @@ impl MerkleRangeTreeV2 {
     }
 
     pub fn nodes(&self) -> usize {
-        self.nodes.len()
+        self.nodes
+            .len()
     }
 
     /// Check if the MMR is empty
@@ -136,6 +190,8 @@ mod tests {
         assert_eq!(height, 0);
         assert_eq!(mmr.len(), 1);
         assert_eq!(&mmr.get_peaks(), &[0]);
+        assert_eq!(mmr.leaf(0), Some("a".to_string()));
+        assert_eq!(mmr.node_hash(0), Some("a".into()));
 
         let (pos, height) = mmr.append("b".into());
         dbg!(&mmr);
@@ -144,6 +200,13 @@ mod tests {
         assert_eq!(mmr.len(), 2);
         assert_eq!(mmr.nodes(), 3);
         assert_eq!(&mmr.get_peaks(), &[2]);
+        // position 2 is the a+b merge node, not a leaf.
+        assert_eq!(mmr.leaf(2), None);
+        assert_eq!(mmr.node_hash(2), Some(mmr.get_root().unwrap()));
+        assert_eq!(
+            mmr.peak_hashes(),
+            vec![(2, 1, mmr.node_hash(2).unwrap())]
+        );
 
         let (pos, height) = mmr.append("c".into());
         dbg!(&mmr);
