@@ -7,6 +7,9 @@ mod mmr;
 mod mmr_sync;
 mod mmr_v2;
 
+use crate::chain::EventChain;
+use crate::mmr_v2::MerkleRangeTreeV2;
+use crate::protocol::{SyncRequest, SyncResponse};
 use crate::sync_ticket::SyncTicket;
 use iroh::{
     address_lookup::memory::MemoryLookup, endpoint::presets, protocol::Router, Endpoint,
@@ -96,10 +99,14 @@ async fn listen(
                 .into(),
         )
         .await?;
+    let tree = MerkleRangeTreeV2::new();
+    let chain = EventChain::new();
+    let response_sender = sender.clone();
+
     let mut set: JoinSet<Result<(), AnyError>> = JoinSet::new();
     set.spawn(async move {
-        // and read messages from others
-        process_messages(&mut receiver).await?;
+        // and read messages from others, answering any sync requests among them
+        process_messages(&mut receiver, response_sender, tree, chain).await?;
         Ok(())
     });
     set.spawn(async move {
@@ -119,17 +126,36 @@ async fn listen(
     Ok(router)
 }
 
-async fn process_messages(receiver: &mut GossipReceiver) -> Result<(), AnyError> {
+/// Read events off the topic, answering any `SyncRequest`s found among them
+/// (via `protocol::dispatch`) against this node's local `tree`/`chain`, and
+/// logging anything else as before.
+async fn process_messages(
+    receiver: &mut GossipReceiver,
+    sender: GossipSender,
+    tree: MerkleRangeTreeV2,
+    mut chain: EventChain,
+) -> Result<(), AnyError> {
     while let Some(event) = receiver
         .next()
         .await
     {
         if let Event::Received(message) = event? {
-            println!(
-                "received: {:?} from: {:?}",
-                from_utf8(&message.content),
-                message.scope
-            );
+            if let Ok(request) = postcard::from_bytes::<SyncRequest>(&message.content) {
+                let response = protocol::dispatch(&tree, &mut chain, request);
+                let bytes = postcard::to_allocvec(&response).std_context("encode sync response")?;
+                sender
+                    .broadcast(bytes.into())
+                    .await
+                    .std_context("broadcast sync response")?;
+            } else if let Ok(response) = postcard::from_bytes::<SyncResponse>(&message.content) {
+                println!("received sync response: {:?} from: {:?}", response, message.scope);
+            } else {
+                println!(
+                    "received: {:?} from: {:?}",
+                    from_utf8(&message.content),
+                    message.scope
+                );
+            }
         }
     }
     Ok(())
@@ -141,6 +167,13 @@ async fn send_messages(sender: &mut GossipSender) -> Result<(), AnyError> {
             .to_vec()
             .into(),
     ).await?;
+
+    // demonstrate the sync wiring: ask whoever's listening for their MMR root
+    let request = postcard::to_allocvec(&SyncRequest::GetRoot).std_context("encode sync request")?;
+    sender
+        .broadcast(request.into())
+        .await
+        .std_context("broadcast sync request")?;
     Ok(())
 }
 
