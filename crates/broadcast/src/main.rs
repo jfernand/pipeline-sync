@@ -7,7 +7,7 @@ mod mmr;
 mod mmr_sync;
 mod mmr_v2;
 
-use crate::chain::EventChain;
+use crate::chain::{DeviceId, EventChain};
 use crate::mmr_v2::MerkleRangeTreeV2;
 use crate::protocol::{SyncRequest, SyncResponse};
 use crate::sync_ticket::SyncTicket;
@@ -21,7 +21,11 @@ use n0_error::{AnyError, Result, StdResultExt};
 use n0_future::StreamExt;
 use std::env;
 use std::str::{from_utf8, FromStr};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use iroh_gossip::api::{GossipReceiver, GossipSender};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 
 #[tokio::main]
@@ -82,7 +86,7 @@ async fn listen(
         .spawn();
     // then, you can subscribe to the topic and join your initial peers
     let peer_ids = bootstrap_peers.iter().map(|p| p.id).collect();
-    let (mut sender, mut receiver) = gossip
+    let (sender, mut receiver) = gossip
         .subscribe(topic_id, peer_ids)
         .await?
         .split();
@@ -99,19 +103,30 @@ async fn listen(
                 .into(),
         )
         .await?;
-    let tree = MerkleRangeTreeV2::new();
-    let chain = EventChain::new();
+
+    // demonstrate the sync wiring: ask whoever's listening for their MMR root
+    let get_root = postcard::to_allocvec(&SyncRequest::GetRoot).std_context("encode sync request")?;
+    sender
+        .broadcast(get_root.into())
+        .await
+        .std_context("broadcast sync request")?;
+
+    let tree = Arc::new(Mutex::new(MerkleRangeTreeV2::new()));
+    let chain = Arc::new(Mutex::new(EventChain::new()));
+    let device_id = DeviceId::random();
     let response_sender = sender.clone();
+    let receive_tree = tree.clone();
+    let receive_chain = chain.clone();
 
     let mut set: JoinSet<Result<(), AnyError>> = JoinSet::new();
     set.spawn(async move {
         // and read messages from others, answering any sync requests among them
-        process_messages(&mut receiver, response_sender, tree, chain).await?;
+        process_messages(&mut receiver, response_sender, receive_tree, receive_chain).await?;
         Ok(())
     });
     set.spawn(async move {
-        // and read messages from others
-        send_messages(&mut sender).await?;
+        // turn stdin lines into real chain events + MMR leaves, and broadcast them
+        author_local_events(sender, tree, chain, device_id).await?;
         Ok(())
     });
 
@@ -132,8 +147,8 @@ async fn listen(
 async fn process_messages(
     receiver: &mut GossipReceiver,
     sender: GossipSender,
-    tree: MerkleRangeTreeV2,
-    mut chain: EventChain,
+    tree: Arc<Mutex<MerkleRangeTreeV2>>,
+    chain: Arc<Mutex<EventChain>>,
 ) -> Result<(), AnyError> {
     while let Some(event) = receiver
         .next()
@@ -141,7 +156,11 @@ async fn process_messages(
     {
         if let Event::Received(message) = event? {
             if let Ok(request) = postcard::from_bytes::<SyncRequest>(&message.content) {
-                let response = protocol::dispatch(&tree, &mut chain, request);
+                let response = {
+                    let tree = tree.lock().await;
+                    let mut chain = chain.lock().await;
+                    protocol::dispatch(&tree, &mut chain, request)
+                };
                 let bytes = postcard::to_allocvec(&response).std_context("encode sync response")?;
                 sender
                     .broadcast(bytes.into())
@@ -161,19 +180,44 @@ async fn process_messages(
     Ok(())
 }
 
-async fn send_messages(sender: &mut GossipSender) -> Result<(), AnyError> {
-    sender.broadcast(
-        "Hello".as_bytes()
-            .to_vec()
-            .into(),
-    ).await?;
-
-    // demonstrate the sync wiring: ask whoever's listening for their MMR root
-    let request = postcard::to_allocvec(&SyncRequest::GetRoot).std_context("encode sync request")?;
-    sender
-        .broadcast(request.into())
+/// Read lines from stdin and turn each into a real local event: appended to
+/// `chain` (authored by this node's `device_id`) and to `tree` as an MMR leaf,
+/// then broadcast to the topic as before.
+async fn author_local_events(
+    sender: GossipSender,
+    tree: Arc<Mutex<MerkleRangeTreeV2>>,
+    chain: Arc<Mutex<EventChain>>,
+    device_id: DeviceId,
+) -> Result<(), AnyError> {
+    let mut lines = BufReader::new(tokio::io::stdin()).lines();
+    while let Some(line) = lines
+        .next_line()
         .await
-        .std_context("broadcast sync request")?;
+        .std_context("read stdin")?
+    {
+        if line.is_empty() {
+            continue;
+        }
+
+        let timestamp_millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        {
+            let mut chain = chain.lock().await;
+            chain.add_event(line.clone(), device_id.clone(), timestamp_millis);
+        }
+        {
+            let mut tree = tree.lock().await;
+            tree.append(line.clone());
+        }
+
+        sender
+            .broadcast(line.into_bytes().into())
+            .await
+            .std_context("broadcast local event")?;
+    }
     Ok(())
 }
 
