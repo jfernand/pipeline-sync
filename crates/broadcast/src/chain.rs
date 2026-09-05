@@ -1,4 +1,5 @@
 #[allow(unused)]
+use crate::sha256::Sha256Hash;
 use std::collections::HashMap;
 use std::fmt::Display;
 use uuid::Uuid;
@@ -23,13 +24,21 @@ struct EventEnvelope {
 impl EventEnvelope {
     fn new(
         payload: String,
-        parent_hashes: Vec<Hash>,
+        mut parent_hashes: Vec<Hash>,
         device_id: DeviceId,
         sequence: u64,
         timestamp_millis: u64,
     ) -> Self {
+        parent_hashes.sort();
+        let hash = Self::compute_hash(
+            &parent_hashes,
+            &device_id,
+            sequence,
+            timestamp_millis,
+            &payload,
+        );
         Self {
-            hash: Hash::new(payload.clone()),
+            hash,
             parent_hashes,
             device_id,
             sequence,
@@ -37,9 +46,23 @@ impl EventEnvelope {
             payload,
         }
     }
+
+    fn compute_hash(
+        parent_hashes: &[Hash],
+        device_id: &DeviceId,
+        sequence: u64,
+        timestamp_millis: u64,
+        payload: &str,
+    ) -> Hash {
+        let canonical = format!(
+            "{:?}|{:?}|{}|{}|{}",
+            parent_hashes, device_id, sequence, timestamp_millis, payload
+        );
+        Hash::new(Sha256Hash::from(canonical.as_str()).to_hex().into())
+    }
 }
 
-#[derive(Eq, Hash, PartialEq, Clone, Debug)]
+#[derive(Eq, Hash, PartialEq, PartialOrd, Ord, Clone, Debug)]
 pub struct Hash(String);
 
 impl Display for Hash {
@@ -55,7 +78,7 @@ impl Hash {
 }
 
 #[allow(unused)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct DeviceId(String);
 
 impl DeviceId {
