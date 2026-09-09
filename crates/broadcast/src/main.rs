@@ -6,6 +6,7 @@ mod merkle;
 mod mmr;
 mod mmr_sync;
 mod mmr_v2;
+mod mmr_v2_sync;
 
 use crate::chain::{DeviceId, EventChain};
 use crate::mmr_v2::MerkleRangeTreeV2;
