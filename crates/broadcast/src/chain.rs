@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use uuid::Uuid;
 
-pub(crate) struct EventChain {
+pub struct EventChain {
     store: HashMap<Hash, EventEnvelope>,
     local_tip: Option<Hash>,
     sequence: u64,
@@ -13,7 +13,7 @@ pub(crate) struct EventChain {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[allow(unused)]
-pub(crate) struct EventEnvelope {
+pub struct EventEnvelope {
     hash: Hash,
     parent_hashes: Vec<Hash>,
     device_id: DeviceId,
@@ -80,10 +80,10 @@ impl Hash {
 
 #[allow(unused)]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub(crate) struct DeviceId(String);
+pub struct DeviceId(String);
 
 impl DeviceId {
-    pub(crate) fn random() -> DeviceId {
+    pub fn random() -> DeviceId {
         DeviceId(Uuid::new_v4() .to_string())
     }
 
@@ -93,7 +93,7 @@ impl DeviceId {
 }
 
 impl EventChain {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         EventChain {
             store: HashMap::new(),
             local_tip: None,
@@ -101,7 +101,7 @@ impl EventChain {
         }
     }
 
-    pub(crate) fn add_event(&mut self, payload: String, device_id: DeviceId, timestamp_millis: u64) {
+    pub fn add_event(&mut self, payload: String, device_id: DeviceId, timestamp_millis: u64) {
         self.sequence += 1;
         let parent_hashes = match &self.local_tip {
             None => vec![],
@@ -195,7 +195,7 @@ impl EventChain {
 }
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) enum ChainError {
+pub enum ChainError {
     NothingToMerge,
     NotAuthorizedResolver {
         attempted: DeviceId,

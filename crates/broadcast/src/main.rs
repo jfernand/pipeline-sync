@@ -1,17 +1,7 @@
-mod sync_ticket;
-mod protocol;
-mod chain;
-mod sha256;
-mod merkle;
-mod mmr;
-mod mmr_sync;
-mod mmr_v2;
-mod mmr_v2_sync;
-
-use crate::chain::{DeviceId, EventChain};
-use crate::mmr_v2::MerkleRangeTreeV2;
-use crate::protocol::{SyncRequest, SyncResponse};
-use crate::sync_ticket::SyncTicket;
+use broadcast::chain::{DeviceId, EventChain};
+use broadcast::mmr_v2::MerkleRangeTreeV2;
+use broadcast::protocol::{self, SyncRequest, SyncResponse};
+use broadcast::sync_ticket::{topic_id, SyncTicket};
 use iroh::{
     address_lookup::memory::MemoryLookup, endpoint::presets, protocol::Router, Endpoint,
     EndpointAddr,
@@ -220,12 +210,4 @@ async fn author_local_events(
             .std_context("broadcast local event")?;
     }
     Ok(())
-}
-
-fn topic_id(topic_name: &str) -> TopicId {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(topic_name.as_bytes());
-    let topic_id_bytes = hasher.finalize();
-    TopicId::from_bytes(topic_id_bytes.into())
 }

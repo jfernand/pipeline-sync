@@ -32,7 +32,7 @@ impl FromStr for SyncTicket {
 }
 
 impl SyncTicket {
-    pub(crate) fn new(topic: TopicId, endpoint: Endpoint) -> Self {
+    pub fn new(topic: TopicId, endpoint: Endpoint) -> Self {
         SyncTicket {
             topic,
             peers: vec![
@@ -53,10 +53,18 @@ impl Display for SyncTicket {
     }
 }
 
+pub fn topic_id(topic_name: &str) -> TopicId {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(topic_name.as_bytes());
+    let topic_id_bytes = hasher.finalize();
+    TopicId::from_bytes(topic_id_bytes.into())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::sync_ticket::SyncTicket;
-    use crate::topic_id;
+    use super::topic_id;
     use iroh::address_lookup::memory::MemoryLookup;
     use iroh::endpoint::presets;
     use iroh::protocol::Router;

@@ -30,7 +30,7 @@ impl From<String> for Sha256Text {
 }
 
 #[derive(Clone, PartialEq, Eq, Copy, Default, serde::Serialize, serde::Deserialize)]
-pub(crate) struct Sha256Hash([u8; 32]);
+pub struct Sha256Hash([u8; 32]);
 
 impl Sha256Hash {
     pub fn new(bytes: [u8; 32]) -> Self {
