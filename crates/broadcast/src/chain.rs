@@ -87,7 +87,7 @@ impl DeviceId {
         DeviceId(Uuid::new_v4() .to_string())
     }
 
-    pub(crate) fn new(id: String) -> DeviceId {
+    pub fn new(id: String) -> DeviceId {
         DeviceId(id)
     }
 }
@@ -132,7 +132,7 @@ impl EventChain {
 
     /// The current DAG leaves: hashes not referenced as a parent by any other event.
     /// More than one head means the chain has diverged and needs a merge event.
-    pub(crate) fn heads(&self) -> Vec<Hash> {
+    pub fn heads(&self) -> Vec<Hash> {
         let referenced: std::collections::HashSet<&Hash> = self
             .store
             .values()
@@ -154,7 +154,7 @@ impl EventChain {
     /// state, so any peer holding the same heads computes the same answer without
     /// coordinating — that's what prevents two devices from both authoring a
     /// resolution for the same fork.
-    pub(crate) fn resolver(&self) -> Option<DeviceId> {
+    pub fn resolver(&self) -> Option<DeviceId> {
         self.heads()
             .into_iter()
             .filter_map(|hash| self.store.get(&hash).map(|event| event.device_id.clone()))
