@@ -1,0 +1,110 @@
+# Builds crates/pipeline-ffi, the native sync library the Pipeline app ships, for every platform
+# the app packages it on, plus the Kotlin bindings uniffi generates for it. A tag `ffi-vX.Y.Z`
+# publishes them all as one GitHub release, which the app's build downloads by version and checks
+# against the SHA-256 sums it pins. Run by hand, it builds without publishing.
+name: FFI
+
+on:
+  push:
+    tags: ["ffi-v*"]
+  workflow_dispatch:
+
+env:
+  # The repo's rust-toolchain.toml pins a Linux-hosted nightly for the embedded work; the library
+  # builds on stable, and has to on the Windows runner.
+  RUSTUP_TOOLCHAIN: "1.98.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    name: Linux x86_64 and Kotlin bindings
+    # The oldest supported runner, so the library asks for the oldest glibc we can give it.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - run: cargo test --workspace
+      - run: cargo build -p pipeline-ffi --lib --profile ffi --target x86_64-unknown-linux-gnu
+      - name: Generate the Kotlin bindings
+        run: |
+          cargo run -p pipeline-ffi --bin uniffi-bindgen -- generate --no-format \
+            --library target/x86_64-unknown-linux-gnu/ffi/libpipeline_ffi.so \
+            --language kotlin --out-dir bindings
+      - name: Collect
+        run: |
+          mkdir dist
+          cp target/x86_64-unknown-linux-gnu/ffi/libpipeline_ffi.so dist/libpipeline_ffi-linux-x86_64.so
+          cp bindings/uniffi/pipeline_ffi/pipeline_ffi.kt dist/pipeline_ffi.kt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ffi-linux
+          path: dist/
+
+  android:
+    name: Android
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: >-
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+          --target aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - name: Build
+        # API 24 is the app's minSdk. The NDK's clang wrappers are named by triple and API level;
+        # 32-bit ARM's is armv7a-linux-androideabi, not the Rust triple's armv7.
+        run: |
+          NDK_BIN="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          mkdir dist
+          for pair in aarch64-linux-android:aarch64-linux-android:arm64-v8a \
+                      armv7-linux-androideabi:armv7a-linux-androideabi:armeabi-v7a \
+                      x86_64-linux-android:x86_64-linux-android:x86_64; do
+            IFS=: read -r target clang abi <<< "$pair"
+            env_target=$(echo "$target" | tr 'a-z-' 'A-Z_')
+            export "CARGO_TARGET_${env_target}_LINKER=$NDK_BIN/${clang}24-clang"
+            export "CC_${target//-/_}=$NDK_BIN/${clang}24-clang"
+            export "AR_${target//-/_}=$NDK_BIN/llvm-ar"
+            cargo build -p pipeline-ffi --lib --profile ffi --target "$target"
+            cp "target/$target/ffi/libpipeline_ffi.so" "dist/libpipeline_ffi-android-$abi.so"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ffi-android
+          path: dist/
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: rustup toolchain install "$env:RUSTUP_TOOLCHAIN" --profile minimal
+      - run: cargo build -p pipeline-ffi --lib --profile ffi --target x86_64-pc-windows-msvc
+      - name: Collect
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/ffi/pipeline_ffi.dll dist/pipeline_ffi-windows-x86_64.dll
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ffi-windows
+          path: dist/
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/ffi-v')
+    needs: [linux, android, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: ffi-*
+          merge-multiple: true
+          path: dist/
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY"
+          --title "pipeline-ffi ${GITHUB_REF_NAME#ffi-v}"
+          --notes "Native sync library and Kotlin bindings for the Pipeline app. Verify downloads against SHA256SUMS."
