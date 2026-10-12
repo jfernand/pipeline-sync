@@ -1,0 +1,23 @@
+[package]
+name = "pipeline-ffi"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+# Packaging spike (PL-025): can a uniffi library that runs an iroh endpoint load in the Kotlin
+# app on Android and the desktop, inside the APK, .deb and .msi?
+[lib]
+name = "pipeline_ffi"
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
+[dependencies]
+iroh = { workspace = true }
+iroh-mdns-address-lookup = { workspace = true }
+n0-error = { workspace = true }
+thiserror = "2"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "io-util"] }
+uniffi = { version = "0.32.2", features = ["tokio", "cli"] }
