@@ -26,9 +26,12 @@ jobs:
       - run: cargo test --workspace
       - run: cargo build -p pipeline-ffi --lib --profile ffi --target x86_64-unknown-linux-gnu
       - name: Generate the Kotlin bindings
+        # From an unstripped build: uniffi reads the interface from symbols the ffi profile strips.
+        # The interface, and the checksums the bindings verify it by, don't depend on the profile.
         run: |
+          cargo build -p pipeline-ffi --lib --release --target x86_64-unknown-linux-gnu
           cargo run -p pipeline-ffi --bin uniffi-bindgen -- generate --no-format \
-            --library target/x86_64-unknown-linux-gnu/ffi/libpipeline_ffi.so \
+            --library target/x86_64-unknown-linux-gnu/release/libpipeline_ffi.so \
             --language kotlin --out-dir bindings
       - name: Collect
         run: |
