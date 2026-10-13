@@ -1,4 +1,5 @@
 pub mod chain;
+pub mod envelope;
 pub mod merkle;
 pub mod mmr;
 pub mod mmr_sync;

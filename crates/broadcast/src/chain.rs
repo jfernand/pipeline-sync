@@ -1,95 +1,11 @@
-#[allow(unused)]
-use crate::sha256::Sha256Hash;
+pub use crate::envelope::{DeviceId, EventEnvelope, Hash};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fmt::Display;
-use uuid::Uuid;
 
 pub struct EventChain {
     store: HashMap<Hash, EventEnvelope>,
     local_tip: Option<Hash>,
     sequence: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[allow(unused)]
-pub struct EventEnvelope {
-    hash: Hash,
-    parent_hashes: Vec<Hash>,
-    device_id: DeviceId,
-    sequence: u64,
-    timestamp_millis: u64,
-    payload: String,
-}
-
-impl EventEnvelope {
-    fn new(
-        payload: String,
-        mut parent_hashes: Vec<Hash>,
-        device_id: DeviceId,
-        sequence: u64,
-        timestamp_millis: u64,
-    ) -> Self {
-        parent_hashes.sort();
-        let hash = Self::compute_hash(
-            &parent_hashes,
-            &device_id,
-            sequence,
-            timestamp_millis,
-            &payload,
-        );
-        Self {
-            hash,
-            parent_hashes,
-            device_id,
-            sequence,
-            timestamp_millis,
-            payload,
-        }
-    }
-
-    fn compute_hash(
-        parent_hashes: &[Hash],
-        device_id: &DeviceId,
-        sequence: u64,
-        timestamp_millis: u64,
-        payload: &str,
-    ) -> Hash {
-        let canonical = format!(
-            "{:?}|{:?}|{}|{}|{}",
-            parent_hashes, device_id, sequence, timestamp_millis, payload
-        );
-        Hash::new(Sha256Hash::from(canonical.as_str()).to_hex().into())
-    }
-}
-
-#[derive(Eq, Hash, PartialEq, PartialOrd, Ord, Clone, Debug, Serialize, Deserialize)]
-pub struct Hash(String);
-
-impl Display for Hash {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl Hash {
-    pub(crate) fn new(payload: String) -> Self {
-        Hash(payload)
-    }
-}
-
-#[allow(unused)]
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct DeviceId(String);
-
-impl DeviceId {
-    pub fn random() -> DeviceId {
-        DeviceId(Uuid::new_v4() .to_string())
-    }
-
-    pub fn new(id: String) -> DeviceId {
-        DeviceId(id)
-    }
 }
 
 impl EventChain {
@@ -107,12 +23,12 @@ impl EventChain {
             None => vec![],
             Some(hash) => vec![hash.clone()],
         };
-        let event = EventEnvelope::new(
-            payload,
-            parent_hashes,
+        let event = EventEnvelope::seal(
             device_id,
             self.sequence,
             timestamp_millis,
+            parent_hashes,
+            payload,
         );
         let event_hash = event.hash.clone();
         self.store
@@ -185,7 +101,7 @@ impl EventChain {
         }
 
         self.sequence += 1;
-        let event = EventEnvelope::new(payload, heads, device_id, self.sequence, timestamp_millis);
+        let event = EventEnvelope::seal(device_id, self.sequence, timestamp_millis, heads, payload);
         let hash = event.hash.clone();
         self.store
             .insert(event.hash.clone(), event);
@@ -230,8 +146,8 @@ mod tests {
             if a < b { (a, b) } else { (b, a) }
         };
 
-        let event_low = EventEnvelope::new("from low".to_string(), vec![root.clone()], low.clone(), 1, 1);
-        let event_high = EventEnvelope::new("from high".to_string(), vec![root], high.clone(), 1, 1);
+        let event_low = EventEnvelope::seal(low.clone(), 1, 1, vec![root.clone()], "from low".to_string());
+        let event_high = EventEnvelope::seal(high.clone(), 1, 1, vec![root], "from high".to_string());
         chain.store.insert(event_low.hash.clone(), event_low);
         chain.store.insert(event_high.hash.clone(), event_high);
 
