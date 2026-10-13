@@ -102,6 +102,13 @@ jobs:
           pattern: ffi-*
           merge-multiple: true
           path: dist/
+      # The envelope vectors the app's tests read (PL-025 design step 1), pinned with the library.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: src
+          sparse-checkout: interop/vectors
+      - name: Envelope vectors
+        run: cp src/interop/vectors/envelope-vectors.json dist/
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
       - name: Create release
